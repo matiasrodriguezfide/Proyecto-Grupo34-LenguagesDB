@@ -5,7 +5,7 @@ from datetime import datetime
 try:
     connection = oracledb.connect(
         user="COFFEEWILD",
-        password="Coffee2025!",
+        password="...",
         dsn="localhost/XEPDB1"
     )
     cursor = connection.cursor()
