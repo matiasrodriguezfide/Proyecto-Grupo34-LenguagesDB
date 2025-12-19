@@ -1280,3 +1280,222 @@ SELECT pr.producto_id,
        (pr.precio_unit * pr.stock_actual) AS valor_inventario
   FROM Producto pr;
 
+  -- Función: total pagado de un pedido
+  CREATE OR REPLACE FUNCTION fn_total_pagado_pedido (p_pedido_id IN NUMBER)
+RETURN NUMBER
+IS
+  v_pagado NUMBER := 0;
+BEGIN
+  SELECT NVL(SUM(monto), 0)
+    INTO v_pagado
+    FROM Pago
+   WHERE pedido_id = p_pedido_id;
+
+  RETURN v_pagado;
+END;
+/
+SHOW ERRORS
+
+/* =========================================================
+  FUNCIONES
+   ========================================================= */
+	
+-- Total pagado de un pedido 
+
+CREATE OR REPLACE FUNCTION fn_total_pagado_pedido (p_pedido_id IN NUMBER)
+RETURN NUMBER IS
+  v_pagado NUMBER;
+BEGIN
+  SELECT NVL(SUM(monto),0)
+    INTO v_pagado
+    FROM Pago
+   WHERE pedido_id = p_pedido_id;
+  RETURN v_pagado;
+END;
+/
+SHOW ERRORS
+
+-- Función: saldo pendiente de un pedido
+
+CREATE OR REPLACE FUNCTION fn_saldo_pedido (p_pedido_id IN NUMBER)
+RETURN NUMBER
+IS
+  v_neto   NUMBER := 0;
+  v_pagado NUMBER := 0;
+BEGIN
+  SELECT total_neto
+    INTO v_neto
+    FROM Pedido
+   WHERE pedido_id = p_pedido_id;
+
+  v_pagado := fn_total_pagado_pedido(p_pedido_id);
+
+  RETURN (v_neto - v_pagado);
+EXCEPTION
+  WHEN NO_DATA_FOUND THEN
+    RETURN 0;
+END;
+/
+SHOW ERRORS
+
+
+--Validar stock suficiente (1=sí, 0=no)
+
+CREATE OR REPLACE FUNCTION fn_stock_suficiente (
+  p_producto_id IN NUMBER,
+  p_cantidad    IN NUMBER
+) RETURN NUMBER IS
+  v_stock NUMBER;
+BEGIN
+  SELECT stock_actual INTO v_stock
+    FROM Producto
+   WHERE producto_id = p_producto_id;
+
+  IF v_stock >= p_cantidad THEN
+    RETURN 1;
+  ELSE
+    RETURN 0;
+  END IF;
+EXCEPTION
+  WHEN NO_DATA_FOUND THEN
+    RETURN 0;
+END;
+/
+SHOW ERRORS
+
+-- Total vendido de un producto (suma cantidades en Pedido_Det)
+
+CREATE OR REPLACE FUNCTION fn_total_vendido_producto (p_producto_id IN NUMBER)
+RETURN NUMBER IS
+  v_vendido NUMBER;
+BEGIN
+  SELECT NVL(SUM(cantidad),0)
+    INTO v_vendido
+    FROM Pedido_Det
+   WHERE producto_id = p_producto_id;
+
+  RETURN v_vendido;
+END;
+/
+SHOW ERRORS
+
+
+-- Valor del inventario (precio_unit * stock_actual)
+
+CREATE OR REPLACE FUNCTION fn_valor_inventario_producto (p_producto_id IN NUMBER)
+RETURN NUMBER IS
+  v_valor NUMBER;
+BEGIN
+  SELECT (precio_unit * stock_actual)
+    INTO v_valor
+    FROM Producto
+   WHERE producto_id = p_producto_id;
+
+  RETURN NVL(v_valor,0);
+EXCEPTION
+  WHEN NO_DATA_FOUND THEN
+    RETURN 0;
+END;
+/
+SHOW ERRORS
+
+
+/* =========================================================
+   CURSORES
+   ========================================================= */
+
+-- Productos con stock bajo (OPEN/FETCH/CLOSE)
+
+DECLARE
+  CURSOR c_stock_bajo IS
+    SELECT producto_id, nombre, stock_actual
+      FROM Producto
+     WHERE stock_actual < 10
+     ORDER BY stock_actual ASC;
+
+  v_id    Producto.producto_id%TYPE;
+  v_nom   Producto.nombre%TYPE;
+  v_stock Producto.stock_actual%TYPE;
+BEGIN
+  OPEN c_stock_bajo;
+  LOOP
+    FETCH c_stock_bajo INTO v_id, v_nom, v_stock;
+    EXIT WHEN c_stock_bajo%NOTFOUND;
+    DBMS_OUTPUT.PUT_LINE('Stock bajo -> '||v_id||' '||v_nom||' ('||v_stock||')');
+  END LOOP;
+  CLOSE c_stock_bajo;
+END;
+/
+
+
+-- Pedidos pendientes con saldo (FOR LOOP)
+
+BEGIN
+  FOR r IN (
+    SELECT p.pedido_id, c.nombre cliente, fn_saldo_pedido(p.pedido_id) saldo
+      FROM Pedido p
+      JOIN Cliente c ON c.cliente_id = p.cliente_id
+     WHERE fn_saldo_pedido(p.pedido_id) > 0
+     ORDER BY saldo DESC
+  ) LOOP
+    DBMS_OUTPUT.PUT_LINE('Pendiente -> Pedido '||r.pedido_id||' | '||r.cliente||' | Saldo: '||r.saldo);
+  END LOOP;
+END;
+/
+
+
+-- Envíos activos (PENDIENTE / EN TRÁNSITO)
+
+DECLARE
+  CURSOR c_envios_activos IS
+    SELECT envio_id, pedido_id, empresa, guia, estado
+      FROM Envio
+     WHERE estado IN ('PENDIENTE','EN TRÁNSITO')
+     ORDER BY envio_id;
+
+BEGIN
+  FOR r IN c_envios_activos LOOP
+    DBMS_OUTPUT.PUT_LINE('Envío -> '||r.envio_id||' | Pedido '||r.pedido_id||' | '||r.estado);
+  END LOOP;
+END;
+/
+
+-- Top productos (más vendidos) con función
+BEGIN
+  FOR r IN (
+    SELECT producto_id, nombre
+      FROM Producto
+     ORDER BY nombre
+  ) LOOP
+    DBMS_OUTPUT.PUT_LINE('Producto -> '||r.nombre||' | Vendido: '||fn_total_vendido_producto(r.producto_id));
+  END LOOP;
+END;
+/
+
+-- Movimientos de inventario por producto (últimos 10)
+
+DECLARE
+  CURSOR c_movs IS
+    SELECT m.mov_id, p.nombre producto, m.tipo, m.cantidad, m.creado_en
+      FROM Inventario_Mov m
+      JOIN Producto p ON p.producto_id = m.producto_id
+     ORDER BY m.creado_en DESC, m.mov_id DESC;
+
+  v_cont NUMBER := 0;
+BEGIN
+  FOR r IN c_movs LOOP
+    v_cont := v_cont + 1;
+    EXIT WHEN v_cont > 10;
+
+    DBMS_OUTPUT.PUT_LINE('Mov -> '||r.mov_id||' | '||r.producto||' | '||r.tipo||' | '||r.cantidad);
+  END LOOP;
+END;
+/
+
+
+
+
+
+
+
+
